@@ -3,7 +3,10 @@
 from ConfigParser import SafeConfigParser
 import urllib
 import sys
-import json
+try:
+    import ujson as json
+except ImportError:
+    import json
 
 
 def syntax():
