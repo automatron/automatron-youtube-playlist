@@ -194,10 +194,18 @@ class YoutubePlaylistPlugin(object):
             log.msg('Missing YouTube access token for channel %s' % channel)
             return
 
+        config.update_access_token = lambda access_token: self.controller.config.update_plugin_value(
+            self,
+            client.server,
+            channel,
+            'access_token',
+            access_token
+        )
+
         trigger = config.get('trigger', '!youtube')
 
         if message == trigger:
-            items = yield self._youtube_list_playlist_videos(client, channel, config)
+            items = yield self._youtube_list_playlist_videos(config)
             if items is None:
                 return
             elif items:
@@ -212,7 +220,7 @@ class YoutubePlaylistPlugin(object):
                 n = 1
             n = max(1, min(n, int(config.get('history_limit', 9))))
 
-            items = yield self._youtube_list_playlist_videos(client, channel, config)
+            items = yield self._youtube_list_playlist_videos(config)
             if items is None:
                 return
 
@@ -222,7 +230,7 @@ class YoutubePlaylistPlugin(object):
         else:
             video_ids = [match[-1] for match in URL_RE.findall(message)]
             for video_id in video_ids:
-                self._add_to_playlist(client, channel, config, video_id)
+                self._add_to_playlist(config, video_id)
 
     def send_youtube_message(self, client, channel, items):
         if items:
@@ -234,19 +242,17 @@ class YoutubePlaylistPlugin(object):
             client.msg(channel, 'Playlist is empty.')
 
     @defer.inlineCallbacks
-    def _add_to_playlist(self, client, channel, config, video_id):
-        items = yield self._youtube_list_playlist_items(client, channel, config, {
+    def _add_to_playlist(self, config, video_id):
+        items = yield self._youtube_list_playlist_items(config, {
             'videoId': video_id,
         })
         if items is None:
             return
         elif items:
-            log.msg('Video %s is already on the playlist for channel %s.' % (video_id, channel))
+            log.msg('Video %s is already on the playlist.' % video_id)
             return
 
         result = yield self._youtube_request(
-            client,
-            channel,
             config,
             'POST',
             {
@@ -266,11 +272,11 @@ class YoutubePlaylistPlugin(object):
         if result is None:
             log.msg('YouTube API request failed (video_id=%s).' % video_id)
         else:
-            log.msg('Video %s was added to the playlist for channel %s.' % (video_id, channel))
+            log.msg('Video %s was added to the playlist.' % video_id)
 
     @defer.inlineCallbacks
-    def _youtube_list_playlist_videos(self, client, channel, config, filter={}):
-        items = yield self._youtube_list_playlist_items(client, channel, config, filter)
+    def _youtube_list_playlist_videos(self, config, filter={}):
+        items = yield self._youtube_list_playlist_items(config, filter)
         if items is None:
             defer.returnValue(None)
 
@@ -281,7 +287,7 @@ class YoutubePlaylistPlugin(object):
         ])
 
     @defer.inlineCallbacks
-    def _youtube_list_playlist_items(self, client, channel, config, query=None):
+    def _youtube_list_playlist_items(self, config, query=None):
         query = dict({
             'part': 'snippet',
             'playlistId': config['playlist_id'],
@@ -295,13 +301,7 @@ class YoutubePlaylistPlugin(object):
             if page_token is not None:
                 query['pageToken'] = page_token
 
-            body = yield self._youtube_request(
-                client,
-                channel,
-                config,
-                'GET',
-                query
-            )
+            body = yield self._youtube_request(config, 'GET', query)
 
             if body is not None:
                 items.extend(body['items'])
@@ -314,7 +314,7 @@ class YoutubePlaylistPlugin(object):
         defer.returnValue(sorted(items, key=lambda v: v['snippet']['position']))
 
     @defer.inlineCallbacks
-    def _youtube_request(self, client, channel, config, method, query=None, body=None):
+    def _youtube_request(self, config, method, query=None, body=None):
         attempts = 0
         while attempts < 2:
             attempts += 1
@@ -328,7 +328,7 @@ class YoutubePlaylistPlugin(object):
             if response.code == 200:
                 defer.returnValue(response_body)
             elif response.code == 401:
-                result = yield self._refresh_access_token(client, channel, config)
+                result = yield self._refresh_access_token(config)
                 if result is True:
                     continue
             else:
@@ -336,7 +336,7 @@ class YoutubePlaylistPlugin(object):
             break
 
     @defer.inlineCallbacks
-    def _refresh_access_token(self, client, channel, config):
+    def _refresh_access_token(self, config):
         if self.client_id is None or self.client_secret is None:
             log.msg('YouTube API access token expired but client id and/or secret are unavailable.')
             defer.returnValue(False)
@@ -366,13 +366,7 @@ class YoutubePlaylistPlugin(object):
 
             log.msg('Succesfully refreshed access_token.')
             config['access_token'] = body['access_token']
-            yield self.controller.config.update_plugin_value(
-                self,
-                client.server,
-                channel,
-                'access_token',
-                body['access_token'].encode('UTF-8')
-            )
+            config.update_access_token(body['access_token'].encode('UTF-8'))
             defer.returnValue(True)
         except Exception as e:
             log.err(e, 'Failed to refresh access_token')
