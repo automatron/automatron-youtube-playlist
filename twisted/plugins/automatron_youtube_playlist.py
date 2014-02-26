@@ -379,25 +379,19 @@ class YoutubePlaylistPlugin(object):
             defer.returnValue(False)
 
     @defer.inlineCallbacks
-    def _request(self, method, url, query=None, body=None, content_type='application/json'):
+    def _request(self, method, url, query=None, body=None):
         if query is not None:
             url += '?' + urllib.urlencode(query)
 
         if body is not None:
-            if content_type == 'application/json':
-                body = json.dumps(body)
-            elif content_type == 'application/x-www-form-urlencoded':
-                body = urllib.urlencode(body)
-            else:
-                body = str(body)
-            body = FileBodyProducer(StringIO(body))
+            body = FileBodyProducer(StringIO(json.dumps(body)))
 
         response = yield self.agent.request(
             method,
             url,
             Headers({
                 'User-Agent': ['Automatron YouTube Playlist Plugin'],
-                'Content-Type': [content_type],
+                'Content-Type': ['application/json'],
             }),
             body,
         )
@@ -412,9 +406,8 @@ class YoutubePlaylistPlugin(object):
             if ct.split(';')[0].lower() == 'application/json':
                 try:
                     body = json.loads(body)
-                except ValueError:
-                    log.msg('Unable to decode json body: ' + body)
-                    log.err()
+                except ValueError as e:
+                    log.err(e, 'Failed to decode JSON body')
                     defer.returnValue((None, None))
 
         defer.returnValue((response, body))
