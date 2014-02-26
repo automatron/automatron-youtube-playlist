@@ -349,17 +349,21 @@ class YoutubePlaylistPlugin(object):
             log.msg('YouTube API access token expired but refresh_token is unavailable.')
             defer.returnValue(False)
 
-        response, body = yield self._request('POST', self.token_uri, None, {
-            'refresh_token': config['refresh_token'],
-            'grant_type': 'refresh_token',
-            'client_id': self.client_id,
-            'client_secret': self.client_secret,
-        }, 'application/x-www-form-urlencoded')
+        try:
+            body = json.loads((yield getPage(
+                self.token_uri,
+                method='POST',
+                postdata=urllib.urlencode({
+                    'refresh_token': config['refresh_token'],
+                    'grant_type': 'refresh_token',
+                    'client_id': self.client_id,
+                    'client_secret': self.client_secret,
+                }),
+                headers={
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+            )))
 
-        if response.code != 200:
-            log.msg('Failed to refresh access_token: %d %s %s' % (response.code, response.phrase, body['error']))
-            defer.returnValue(False)
-        else:
             log.msg('Succesfully refreshed access_token.')
             config['access_token'] = body['access_token']
             yield self.controller.config.update_plugin_value(
@@ -367,9 +371,12 @@ class YoutubePlaylistPlugin(object):
                 client.server,
                 channel,
                 'access_token',
-                body['access_token']
+                body['access_token'].encode('UTF-8')
             )
             defer.returnValue(True)
+        except Exception as e:
+            log.err(e, 'Failed to refresh access_token')
+            defer.returnValue(False)
 
     @defer.inlineCallbacks
     def _request(self, method, url, query=None, body=None, content_type='application/json'):
