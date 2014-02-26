@@ -31,7 +31,4 @@ setup(
     include_package_data=True,
     zip_safe=False,
     install_requires=requires,
-    scripts=[
-        'scripts/automatron-youtube-setup',
-    ]
 )

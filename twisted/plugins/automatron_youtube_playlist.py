@@ -1,3 +1,6 @@
+from ConfigParser import NoSectionError
+from automatron.command import IAutomatronCommandHandler
+
 try:
     import ujson as json
 except ImportError:
@@ -8,7 +11,7 @@ from StringIO import StringIO
 from twisted.internet import defer
 from twisted.internet import reactor
 from twisted.python import log
-from twisted.web.client import Agent, FileBodyProducer, readBody, PartialDownloadError
+from twisted.web.client import Agent, FileBodyProducer, readBody, PartialDownloadError, getPage
 from twisted.web.http_headers import Headers
 from zope.interface import implements, classProvides
 from automatron.plugin import IAutomatronPluginFactory, STOP
@@ -19,6 +22,9 @@ import re
 URL_RE = re.compile(r'(https?://(www\.)?youtube.com/(watch)?\?(.+&)?vi?=|'
                     r'https?://(www.)?youtube.com/(vi?|embed)/|'
                     r'https?://youtu.be/)([a-zA-Z0-9_-]{11})')
+
+DEFAULT_AUTH_URI = 'https://accounts.google.com/o/oauth2/auth'
+DEFAULT_TOKEN_URI = 'https://accounts.google.com/o/oauth2/token'
 
 
 def flatten_dict(dd, separator='_', prefix=''):
@@ -31,7 +37,7 @@ def flatten_dict(dd, separator='_', prefix=''):
 
 class YoutubePlaylistPlugin(object):
     classProvides(IAutomatronPluginFactory)
-    implements(IAutomatronMessageHandler)
+    implements(IAutomatronMessageHandler, IAutomatronCommandHandler)
 
     name = 'youtube_playlist'
     priority = 100
@@ -39,6 +45,143 @@ class YoutubePlaylistPlugin(object):
     def __init__(self, controller):
         self.controller = controller
         self.agent = Agent(reactor)
+
+        try:
+            config = dict(controller.config_file.items('google'))
+        except NoSectionError:
+            config = {}
+        self.client_id = config.get('client_id')
+        self.client_secret = config.get('client_secret')
+        self.auth_uri = config.get('auth_uri', DEFAULT_AUTH_URI)
+        self.token_uri = config.get('token_uri', DEFAULT_TOKEN_URI)
+
+    def on_command(self, client, user, command, args):
+        nickname = client.parse_user(user)[0]
+
+        if command == 'youtube-auth':
+            if not self.auth_uri or not self.token_uri or not self.client_id or not self.client_secret:
+                client.msg(nickname, 'Sorry, authentication is disabled.')
+            elif len(args) == 1 and args[0] == 'start':
+                self._on_command_auth_request(client, user)
+            elif len(args) >= 2:
+                self._on_command_auth_response(client, user, args[0], args[1:])
+            else:
+                client.msg(nickname, 'To start authentication, use: youtube-auth start')
+            return STOP
+        elif command == 'youtube-playlist':
+            if len(args) < 2:
+                client.msg(nickname, 'Syntax: youtube-playlist <playlist-id> <channel...>')
+            else:
+                self._on_command_playlist(client, user, args[0], args[1:])
+            return STOP
+
+    @defer.inlineCallbacks
+    def _on_command_auth_request(self, client, user):
+        nickname = client.parse_user(user)[0]
+
+        url = self.auth_uri + '?' + urllib.urlencode({
+            'scope': 'https://www.googleapis.com/auth/youtube',
+            'redirect_uri': 'urn:ietf:wg:oauth:2.0:oob',
+            'response_type': 'code',
+            'client_id': self.client_id,
+        })
+
+        try:
+            response = json.loads((yield getPage(
+                'https://www.googleapis.com/urlshortener/v1/url',
+                method='POST',
+                postdata=json.dumps({'longUrl': url}),
+                headers={
+                    'Content-Type': 'application/json',
+                },
+            )))
+            url = response['id'].encode('utf-8')
+            if 'error' in response:
+                raise Exception(response.get('error_description', response['error']))
+        except Exception as e:
+            log.err(e, 'Failed to short URL')
+
+        client.msg(nickname, 'Please visit: %s' % url)
+        client.msg(nickname, 'Then use: youtube-auth <response code> <channels...>')
+
+    @defer.inlineCallbacks
+    def _on_command_auth_response(self, client, user, response_code, channels):
+        nickname = client.parse_user(user)[0]
+
+        for channel in channels:
+            if not (yield self.controller.config.has_permission(client.server, channel, user, 'youtube-playlist')):
+                client.msg(nickname, 'You\'re not authorized to change settings for %s' % channel)
+                return
+
+        data = {
+            'code': response_code,
+            'redirect_uri': 'urn:ietf:wg:oauth:2.0:oob',
+            'grant_type': 'authorization_code',
+            'client_id': self.client_id,
+            'client_secret': self.client_secret,
+        }
+
+        try:
+            response = json.loads((yield getPage(
+                self.token_uri,
+                method='POST',
+                postdata=urllib.urlencode(data),
+                headers={
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+            )))
+            if 'error' in response:
+                raise Exception(response.get('error_description', response['error']))
+        except Exception as e:
+            log.err(e, 'Failed to retrieve or decode access token')
+            client.msg(nickname, 'Failed to retrieve or decode access token.')
+            return
+
+        for channel in channels:
+            access_token = response.get('access_token')
+            if access_token is not None:
+                access_token = access_token.encode('UTF-8')
+
+            refresh_token = response.get('refresh_token')
+            if refresh_token is not None:
+                refresh_token = refresh_token.encode('UTF-8')
+
+            self.controller.config.update_plugin_value(
+                self,
+                client.server,
+                channel,
+                'access_token',
+                access_token
+            )
+            self.controller.config.update_plugin_value(
+                self,
+                client.server,
+                channel,
+                'refresh_token',
+                refresh_token
+            )
+
+        client.msg(nickname, 'OK')
+
+    @defer.inlineCallbacks
+    def _on_command_playlist(self, client, user, playlist_id, channels):
+        nickname = client.parse_user(user)[0]
+
+        for channel in channels:
+            if not (yield self.controller.config.has_permission(client.server, channel, user, 'youtube-playlist')):
+                client.msg(nickname, 'You\'re not authorized to change settings for %s' % channel)
+                return
+
+        for channel in channels:
+            self.controller.config.update_plugin_value(
+                self,
+                client.server,
+                channel,
+                'playlist_id',
+                playlist_id
+            )
+
+        client.msg(nickname, 'OK')
 
     @defer.inlineCallbacks
     def on_message(self, client, user, channel, message):
@@ -185,24 +328,32 @@ class YoutubePlaylistPlugin(object):
             if response.code == 200:
                 defer.returnValue(response_body)
             elif response.code == 401:
-                if not 'refresh_token' in config:
-                    log.msg('YouTube API access token expired but no refresh_token available.')
-                else:
-                    log.msg('Refreshing YouTube API access token.')
-                    result = yield self._refresh_access_token(client, channel, config)
-                    if result is True:
-                        continue
+                result = yield self._refresh_access_token(client, channel, config)
+                if result is True:
+                    continue
             else:
                 log.msg('YouTube API query failed: %d %s' % (response.code, response.phrase))
             break
 
     @defer.inlineCallbacks
     def _refresh_access_token(self, client, channel, config):
-        response, body = yield self._request('POST', config['token_uri'], None, {
+        if self.client_id is None or self.client_secret is None:
+            log.msg('YouTube API access token expired but client id and/or secret are unavailable.')
+            defer.returnValue(False)
+
+        if not self.token_uri:
+            log.msg('YouTube API access token expired but token uri is unavailable.')
+            defer.returnValue(False)
+
+        if not 'refresh_token' in config:
+            log.msg('YouTube API access token expired but refresh_token is unavailable.')
+            defer.returnValue(False)
+
+        response, body = yield self._request('POST', self.token_uri, None, {
             'refresh_token': config['refresh_token'],
             'grant_type': 'refresh_token',
-            'client_id': config['client_id'],
-            'client_secret': config['client_secret'],
+            'client_id': self.client_id,
+            'client_secret': self.client_secret,
         }, 'application/x-www-form-urlencoded')
 
         if response.code != 200:
