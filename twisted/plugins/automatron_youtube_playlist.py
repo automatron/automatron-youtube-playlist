@@ -314,7 +314,7 @@ class YoutubePlaylistPlugin(object):
         defer.returnValue(sorted(items, key=lambda v: v['snippet']['position']))
 
     @defer.inlineCallbacks
-    def _youtube_request(self, config, method, query=None, body=None):
+    def _youtube_request(self, config, method, query, body=None):
         attempts = 0
         while attempts < 2:
             attempts += 1
