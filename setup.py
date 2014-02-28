@@ -10,7 +10,7 @@ with open(os.path.join(here, 'CHANGES.txt')) as f:
 
 requires = [
     'automatron',
-    'pyOpenSSL',
+    'txgoogleapi',
 ]
 
 setup(
