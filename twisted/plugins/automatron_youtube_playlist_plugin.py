@@ -207,7 +207,7 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
 
         else:
             video_ids = [match[-1] for match in URL_RE.findall(message)]
-            if playlist_id:
+            if video_ids and playlist_id:
                 try:
                     playlist_length = yield self._get_playlist_length(google, playlist_id)
                 except Exception as e:
