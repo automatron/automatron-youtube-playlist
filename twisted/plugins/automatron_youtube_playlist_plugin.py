@@ -148,7 +148,6 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
 
         client.msg(nickname, 'OK')
 
-    @defer.inlineCallbacks
     def _on_update_setting(self, client, user, channels, key, value):
         nickname = client.parse_user(user)[0]
 
