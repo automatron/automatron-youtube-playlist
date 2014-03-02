@@ -55,8 +55,6 @@ class YoutubePlaylistPlugin(object):
         return STOP
 
     def _help(self, client, user):
-        nickname = client.parse_user(user)[0]
-
         for line in """Usage: youtube <task> [args...]
 Available tasks:
 youtube auth start                           - Start authentication
@@ -64,15 +62,13 @@ youtube auth <response code> <channel...>    - Finish authentication
 youtube title <title> <channel...>           - Set playlist title prefix
 youtube playlist <playlist ID> <channel...>  - Set youtube playlist ID
 youtube trigger <trigger> <channel...>       - Change channel trigger""".split('\n'):
-            client.msg(nickname, line)
+            client.msg(user, line)
 
     @defer.inlineCallbacks
     def _on_command(self, client, user, subcommand, args):
-        nickname = client.parse_user(user)[0]
-
         if subcommand == 'auth':
             if not self.requester_factory.is_configured():
-                client.msg(nickname, 'Sorry, authentication is disabled.')
+                client.msg(user, 'Sorry, authentication is disabled.')
             elif len(args) == 1 and args[0] == 'start':
                 self._on_auth_start(client, user)
             elif len(args) >= 2:
@@ -88,19 +84,15 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
 
     @defer.inlineCallbacks
     def _verify_permissions(self, client, user, channels):
-        nickname = client.parse_user(user)[0]
-
         for channel in channels:
             if not (yield self.controller.config.has_permission(client.server, channel, user, 'youtube-playlist')):
-                client.msg(nickname, 'You\'re not authorized to change settings for %s' % channel)
+                client.msg(user, 'You\'re not authorized to change settings for %s' % channel)
                 defer.returnValue(False)
 
         defer.returnValue(True)
 
     @defer.inlineCallbacks
     def _on_auth_start(self, client, user):
-        nickname = client.parse_user(user)[0]
-
         url = self.requester_factory.auth_uri + '?' + urllib.urlencode({
             'response_type': 'code',
             'client_id': self.requester_factory.client_id,
@@ -126,19 +118,17 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
         except Exception as e:
             log.err(e, 'Failed to shorten URL')
 
-        client.msg(nickname, 'Please visit: %s' % url)
-        client.msg(nickname, 'Then use: youtube auth <response code> <channels...>')
+        client.msg(user, 'Please visit: %s' % url)
+        client.msg(user, 'Then use: youtube auth <response code> <channels...>')
 
     @defer.inlineCallbacks
     def _on_auth_response(self, client, user, response_code, channels):
-        nickname = client.parse_user(user)[0]
-
         request = self.requester_factory(client.server, channels[0], {})
         try:
             yield request.request_access_token(response_code)
         except Exception as e:
             log.err(e, 'Failed to retrieve or decode access token')
-            client.msg(nickname, 'Failed to retrieve or decode the access token.')
+            client.msg(user, 'Failed to retrieve or decode the access token.')
             return
 
         for channel in channels[1:]:
@@ -146,11 +136,9 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
             r.access_token = request.access_token
             r.refresh_token = request.refresh_token
 
-        client.msg(nickname, 'OK')
+        client.msg(user, 'OK')
 
     def _on_update_setting(self, client, user, channels, key, value):
-        nickname = client.parse_user(user)[0]
-
         for channel in channels:
             self.controller.config.update_plugin_value(
                 self,
@@ -160,7 +148,7 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
                 value
             )
 
-        client.msg(nickname, 'OK')
+        client.msg(user, 'OK')
 
     def on_message(self, client, user, channel, message):
         return self._on_message(client, channel, message)
