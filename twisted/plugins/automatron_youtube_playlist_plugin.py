@@ -1,6 +1,7 @@
 from ConfigParser import NoOptionError
 import datetime
 from automatron.controller.command import IAutomatronCommandHandler
+from automatron.core.event import STOP
 from automatron_youtube_playlist.config_oauth_requester import ConfigOAuthRequesterFactory
 from txgoogleapi import Google, UnauthRequester, ApiKeyRequester
 import random
@@ -8,7 +9,7 @@ import urllib
 from twisted.internet import defer
 from twisted.python import log
 from zope.interface import implements, classProvides
-from automatron.controller.plugin import IAutomatronPluginFactory, STOP
+from automatron.controller.plugin import IAutomatronPluginFactory
 from automatron.controller.client import IAutomatronMessageHandler
 import re
 try:
