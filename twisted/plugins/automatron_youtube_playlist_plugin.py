@@ -1,6 +1,6 @@
 from ConfigParser import NoOptionError
 import datetime
-from automatron.command import IAutomatronCommandHandler
+from automatron.controller.command import IAutomatronCommandHandler
 from automatron_youtube_playlist.config_oauth_requester import ConfigOAuthRequesterFactory
 from txgoogleapi import Google, UnauthRequester, ApiKeyRequester
 import random
@@ -8,8 +8,8 @@ import urllib
 from twisted.internet import defer
 from twisted.python import log
 from zope.interface import implements, classProvides
-from automatron.plugin import IAutomatronPluginFactory, STOP
-from automatron.client import IAutomatronMessageHandler
+from automatron.controller.plugin import IAutomatronPluginFactory, STOP
+from automatron.controller.client import IAutomatronMessageHandler
 import re
 try:
     import ujson as json
