@@ -53,18 +53,18 @@ class YoutubePlaylistPlugin(object):
             message
         )
 
-    def on_command(self, client, user, command, args):
+    def on_command(self, server, user, command, args):
         if command != 'youtube':
             return
 
         if len(args) == 0:
-            self._help(client, user)
+            self._help(server, user)
         else:
             subcommand, args = args[0], args[1:]
-            self._on_command(client, user, subcommand, args)
+            self._on_command(server, user, subcommand, args)
         return STOP
 
-    def _help(self, client, user):
+    def _help(self, server, user):
         for line in """Usage: youtube <task> [args...]
 Available tasks:
 youtube auth start                           - Start authentication
@@ -72,37 +72,37 @@ youtube auth <response code> <channel...>    - Finish authentication
 youtube title <title> <channel...>           - Set playlist title prefix
 youtube playlist <playlist ID> <channel...>  - Set youtube playlist ID
 youtube trigger <trigger> <channel...>       - Change channel trigger""".split('\n'):
-            self._msg(client.server, user, line)
+            self._msg(server['server'], user, line)
 
     @defer.inlineCallbacks
-    def _on_command(self, client, user, subcommand, args):
+    def _on_command(self, server, user, subcommand, args):
         if subcommand == 'auth':
             if not self.requester_factory.is_configured():
-                self._msg(client.server, user, 'Sorry, authentication is disabled.')
+                self._msg(server['server'], user, 'Sorry, authentication is disabled.')
             elif len(args) == 1 and args[0] == 'start':
-                self._on_auth_start(client, user)
+                self._on_auth_start(server, user)
             elif len(args) >= 2:
-                if (yield self._verify_permissions(client, user, args[1:])):
-                    self._on_auth_response(client, user, args[0], args[1:])
+                if (yield self._verify_permissions(server, user, args[1:])):
+                    self._on_auth_response(server, user, args[0], args[1:])
             else:
-                self._help(client, user)
+                self._help(server, user)
         elif subcommand in ('title', 'playlist', 'trigger') and len(args) >= 2:
-            if (yield self._verify_permissions(client, user, args[1:])):
-                self._on_update_setting(client, user, args[1:], subcommand, args[0])
+            if (yield self._verify_permissions(server, user, args[1:])):
+                self._on_update_setting(server, user, args[1:], subcommand, args[0])
         else:
-            self._help(client, user)
+            self._help(server, user)
 
     @defer.inlineCallbacks
-    def _verify_permissions(self, client, user, channels):
+    def _verify_permissions(self, server, user, channels):
         for channel in channels:
-            if not (yield self.controller.config.has_permission(client.server, channel, user, 'youtube-playlist')):
-                self._msg(client.server, user, 'You\'re not authorized to change settings for %s' % channel)
+            if not (yield self.controller.config.has_permission(server['server'], channel, user, 'youtube-playlist')):
+                self._msg(server['server'], user, 'You\'re not authorized to change settings for %s' % channel)
                 defer.returnValue(False)
 
         defer.returnValue(True)
 
     @defer.inlineCallbacks
-    def _on_auth_start(self, client, user):
+    def _on_auth_start(self, server, user):
         url = self.requester_factory.auth_uri + '?' + urllib.urlencode({
             'response_type': 'code',
             'client_id': self.requester_factory.client_id,
@@ -128,44 +128,44 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
         except Exception as e:
             log.err(e, 'Failed to shorten URL')
 
-        self._msg(client.server, user, 'Please visit: %s' % url)
-        self._msg(client.server, user, 'Then use: youtube auth <response code> <channels...>')
+        self._msg(server['server'], user, 'Please visit: %s' % url)
+        self._msg(server['server'], user, 'Then use: youtube auth <response code> <channels...>')
 
     @defer.inlineCallbacks
-    def _on_auth_response(self, client, user, response_code, channels):
-        request = self.requester_factory(client.server, channels[0], {})
+    def _on_auth_response(self, server, user, response_code, channels):
+        request = self.requester_factory(server['server'], channels[0], {})
         try:
             yield request.request_access_token(response_code)
         except Exception as e:
             log.err(e, 'Failed to retrieve or decode access token')
-            self._msg(client.server, user, 'Failed to retrieve or decode the access token.')
+            self._msg(server['server'], user, 'Failed to retrieve or decode the access token.')
             return
 
         for channel in channels[1:]:
-            r = self.requester_factory(client.server, channel, {})
+            r = self.requester_factory(server['server'], channel, {})
             r.access_token = request.access_token
             r.refresh_token = request.refresh_token
 
-        self._msg(client.server, user, 'OK')
+        self._msg(server['server'], user, 'OK')
 
-    def _on_update_setting(self, client, user, channels, key, value):
+    def _on_update_setting(self, server, user, channels, key, value):
         for channel in channels:
             self.controller.config.update_plugin_value(
                 self,
-                client.server,
+                server['server'],
                 channel,
                 key,
                 value
             )
 
-        self._msg(client.server, user, 'OK')
+        self._msg(server['server'], user, 'OK')
 
-    def on_message(self, client, user, channel, message):
-        return self._on_message(client, channel, message)
+    def on_message(self, server, user, channel, message):
+        return self._on_message(server, channel, message)
 
     @defer.inlineCallbacks
-    def _on_message(self, client, channel, message):
-        config = yield self.controller.config.get_plugin_section(self, client.server, channel)
+    def _on_message(self, server, channel, message):
+        config = yield self.controller.config.get_plugin_section(self, server['server'], channel)
 
         title_prefix = config.get('title')
         playlist_id = config.get('playlist')
@@ -174,13 +174,13 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
 
         trigger = config.get('trigger', '!youtube')
 
-        requester = self.requester_factory(client.server, channel, config)
+        requester = self.requester_factory(server['server'], channel, config)
         google = Google(requester)
 
         if message == trigger:
             d = self._youtube_list_playlist_videos(google, playlist_id)
             d.addCallback(lambda items: self._emit_videos(
-                client,
+                server,
                 channel,
                 [random.choice(items)] if items else []
             ))
@@ -197,7 +197,7 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
 
             d = self._youtube_list_playlist_videos(google, playlist_id)
             d.addCallback(lambda items: self._emit_videos(
-                client,
+                server,
                 channel,
                 reversed(items[-n:]) if items else []
             ))
@@ -224,7 +224,7 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
                     playlist_id = yield self._create_playlist(google, title_prefix)
                     self.controller.config.update_plugin_value(
                         self,
-                        client.server,
+                        server['server'],
                         channel,
                         'playlist',
                         playlist_id
@@ -234,14 +234,14 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
                 if (yield self._add_to_playlist(google, playlist_id, video_id)):
                     playlist_length += 1
 
-    def _emit_videos(self, client, channel, items):
+    def _emit_videos(self, server, channel, items):
         if items:
             for item in items:
                 item = flatten_dict(item['snippet'], separator='.')
                 message = 'https://youtu.be/%(resourceId.videoId)s - %(title)s' % item
-                self._msg(client.server, channel, message.encode('UTF-8'))
+                self._msg(server['server'], channel, message.encode('UTF-8'))
         else:
-            self._msg(client.server, channel, 'Playlist is empty.')
+            self._msg(server['server'], channel, 'Playlist is empty.')
 
     def _get_playlist_length(self, google, playlist_id):
         d = google.youtube.playlistItems.list(part='snippet', playlistId=playlist_id, maxResults=0)
