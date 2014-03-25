@@ -1,7 +1,6 @@
 from ConfigParser import NoOptionError
 import datetime
 from automatron.backend.command import IAutomatronCommandHandler
-from automatron.controller.controller import IAutomatronClientActions
 from automatron.core.event import STOP
 from automatron_youtube_playlist.config_oauth_requester import ConfigOAuthRequesterFactory
 from txgoogleapi import Google, UnauthRequester, ApiKeyRequester
@@ -45,14 +44,6 @@ class YoutubePlaylistPlugin(object):
         self.controller = controller
         self.requester_factory = ConfigOAuthRequesterFactory(self, controller)
 
-    def _msg(self, server, user, message):
-        self.controller.plugins.emit(
-            IAutomatronClientActions['message'],
-            server,
-            user,
-            message
-        )
-
     def on_command(self, server, user, command, args):
         if command != 'youtube':
             return
@@ -72,13 +63,13 @@ youtube auth <response code> <channel...>    - Finish authentication
 youtube title <title> <channel...>           - Set playlist title prefix
 youtube playlist <playlist ID> <channel...>  - Set youtube playlist ID
 youtube trigger <trigger> <channel...>       - Change channel trigger""".split('\n'):
-            self._msg(server['server'], user, line)
+            self.controller.message(server['server'], user, line)
 
     @defer.inlineCallbacks
     def _on_command(self, server, user, subcommand, args):
         if subcommand == 'auth':
             if not self.requester_factory.is_configured():
-                self._msg(server['server'], user, 'Sorry, authentication is disabled.')
+                self.controller.message(server['server'], user, 'Sorry, authentication is disabled.')
             elif len(args) == 1 and args[0] == 'start':
                 self._on_auth_start(server, user)
             elif len(args) >= 2:
@@ -96,7 +87,8 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
     def _verify_permissions(self, server, user, channels):
         for channel in channels:
             if not (yield self.controller.config.has_permission(server['server'], channel, user, 'youtube-playlist')):
-                self._msg(server['server'], user, 'You\'re not authorized to change settings for %s' % channel)
+                self.controller.message(server['server'], user, 'You\'re not authorized to change settings for %s' %
+                                                                channel)
                 defer.returnValue(False)
 
         defer.returnValue(True)
@@ -128,8 +120,8 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
         except Exception as e:
             log.err(e, 'Failed to shorten URL')
 
-        self._msg(server['server'], user, 'Please visit: %s' % url)
-        self._msg(server['server'], user, 'Then use: youtube auth <response code> <channels...>')
+        self.controller.message(server['server'], user, 'Please visit: %s' % url)
+        self.controller.message(server['server'], user, 'Then use: youtube auth <response code> <channels...>')
 
     @defer.inlineCallbacks
     def _on_auth_response(self, server, user, response_code, channels):
@@ -138,7 +130,7 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
             yield request.request_access_token(response_code)
         except Exception as e:
             log.err(e, 'Failed to retrieve or decode access token')
-            self._msg(server['server'], user, 'Failed to retrieve or decode the access token.')
+            self.controller.message(server['server'], user, 'Failed to retrieve or decode the access token.')
             return
 
         for channel in channels[1:]:
@@ -146,7 +138,7 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
             r.access_token = request.access_token
             r.refresh_token = request.refresh_token
 
-        self._msg(server['server'], user, 'OK')
+        self.controller.message(server['server'], user, 'OK')
 
     def _on_update_setting(self, server, user, channels, key, value):
         for channel in channels:
@@ -158,7 +150,7 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
                 value
             )
 
-        self._msg(server['server'], user, 'OK')
+        self.controller.message(server['server'], user, 'OK')
 
     def on_message(self, server, user, channel, message):
         return self._on_message(server, channel, message)
@@ -239,9 +231,9 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
             for item in items:
                 item = flatten_dict(item['snippet'], separator='.')
                 message = 'https://youtu.be/%(resourceId.videoId)s - %(title)s' % item
-                self._msg(server['server'], channel, message.encode('UTF-8'))
+                self.controller.msg(server['server'], channel, message.encode('UTF-8'))
         else:
-            self._msg(server['server'], channel, 'Playlist is empty.')
+            self.controller.msg(server['server'], channel, 'Playlist is empty.')
 
     def _get_playlist_length(self, google, playlist_id):
         d = google.youtube.playlistItems.list(part='snippet', playlistId=playlist_id, maxResults=0)
