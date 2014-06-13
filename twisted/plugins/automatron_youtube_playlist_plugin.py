@@ -231,9 +231,9 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
             for item in items:
                 item = flatten_dict(item['snippet'], separator='.')
                 message = 'https://youtu.be/%(resourceId.videoId)s - %(title)s' % item
-                self.controller.msg(server['server'], channel, message.encode('UTF-8'))
+                self.controller.message(server['server'], channel, message.encode('UTF-8'))
         else:
-            self.controller.msg(server['server'], channel, 'Playlist is empty.')
+            self.controller.message(server['server'], channel, 'Playlist is empty.')
 
     def _get_playlist_length(self, google, playlist_id):
         d = google.youtube.playlistItems.list(part='snippet', playlistId=playlist_id, maxResults=0)
