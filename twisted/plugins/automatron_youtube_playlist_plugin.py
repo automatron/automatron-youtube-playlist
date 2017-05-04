@@ -195,6 +195,12 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
             ))
             defer.returnValue(STOP)
 
+        elif message.startswith(trigger + ' '):
+            query = message[len(trigger) + 1:].strip()
+            d = self._youtube_search_video(google, query)
+            d.addCallback(lambda item: self._emit_result_url(server, channel, item))
+            defer.returnValue(STOP)
+
         else:
             video_ids = [match[-1] for match in URL_RE.findall(message)]
             if video_ids and playlist_id:
@@ -234,6 +240,13 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
                 self.controller.message(server['server'], channel, message.encode('UTF-8'))
         else:
             self.controller.message(server['server'], channel, 'Playlist is empty.')
+
+    def _emit_result_url(self, server, channel, item):
+        if item is None:
+            message = 'Nothing found...'
+        else:
+            message = 'https://www.youtube.com/watch?' + urllib.urlencode({'v': item['id']['videoId']})
+        self.controller.message(server['server'], channel, message)
 
     def _get_playlist_length(self, google, playlist_id):
         d = google.youtube.playlistItems.list(part='snippet', playlistId=playlist_id, maxResults=0)
@@ -314,3 +327,17 @@ youtube trigger <trigger> <channel...>       - Change channel trigger""".split('
             page_token = body['nextPageToken']
 
         defer.returnValue(sorted(items, key=lambda v: v['snippet']['position']))
+
+    @defer.inlineCallbacks
+    def _youtube_search_video(self, google, query):
+        items = yield google.youtube.search(
+            part='snippet',
+            q=query,
+            maxResults=1,
+            order='relevance',
+            type='video',
+        )
+        if not result['items']:
+            defer.returnValue(None)
+        else:
+            defer.returnValue(result[items][0])
